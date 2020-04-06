@@ -28,24 +28,12 @@ if [ -n "$boot_fs" ]; then
     }
 fi
 
-# globbing in grub does not sort
-for label in /systems/*; do
-    regexp --set 1:label "/([0-9]*)\$" "$label"
-    if [ -z "$label" ]; then
-        continue
-    fi
-    # yes, you need to backslash that less-than
-    if [ -z "$best" -o "$label" \< "$best" ]; then
-        set best="$label"
-    fi
-    # if grubenv did not pick mode-system, use best one
-    if [ -z "$snapd_recovery_system" ]; then
-        default=$snapd_recovery_mode-$best
-    fi
-    set snapd_recovery_kernel=
-    load_env --file /systems/$label/grubenv snapd_recovery_kernel
+# if we have a recovery system defined by our grubenv, then we should load that
+# menuentry and only that one
+if [ -n "$snapd_recovery_system" ] && [ -n "$snapd_recovery_mode" ]; then
+    # load the recovery kernel from the system
+    load_env --file /systems/$snapd_recovery_system/grubenv snapd_recovery_kernel
 
-    # We could "source /systems/$snapd_recovery_system/grub.cfg" here as well
     menuentry "Recover using $label" --hotkey=r --id=recover-$label $snapd_recovery_kernel recover $label {
         loopback loop $2
         chainloader (loop)/kernel.efi snapd_recovery_mode=$3 snapd_recovery_system=$4 $standard_params
@@ -54,7 +42,40 @@ for label in /systems/*; do
         loopback loop $2
         chainloader (loop)/kernel.efi snapd_recovery_mode=$3 snapd_recovery_system=$4 $standard_params
     }
-done
+else
+    # if we don't have a system and a mode defined, then we need to pick the 
+    # "best" one from the current recovery systems
+
+    # globbing in grub does not sort
+    for label in /systems/*; do
+        regexp --set 1:label "/([0-9]*)\$" "$label"
+        if [ -z "$label" ]; then
+            continue
+        fi
+        # yes, you need to backslash that less-than
+        if [ -z "$best" -o "$label" \< "$best" ]; then
+            set best="$label"
+        fi
+        # if grubenv did not pick mode-system, use best one
+        if [ -z "$snapd_recovery_system" ]; then
+            default=$snapd_recovery_mode-$best
+        fi
+        set snapd_recovery_kernel=
+        load_env --file /systems/$label/grubenv snapd_recovery_kernel
+
+        # We could "source /systems/$snapd_recovery_system/grub.cfg" here as well
+        menuentry "Recover using $label" --hotkey=r --id=recover-$label $snapd_recovery_kernel recover $label {
+            loopback loop $2
+            chainloader (loop)/kernel.efi snapd_recovery_mode=$3 snapd_recovery_system=$4 $standard_params
+        }
+        menuentry "Install using $label" --hotkey=i --id=install-$label $snapd_recovery_kernel install $label {
+            loopback loop $2
+            chainloader (loop)/kernel.efi snapd_recovery_mode=$3 snapd_recovery_system=$4 $standard_params
+        }
+    done
+fi
+
+
 
 menuentry 'System setup' --hotkey=f 'uefi-firmware' {
     fwsetup
